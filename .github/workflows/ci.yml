@@ -47,11 +47,27 @@ jobs:
 
   e2e:
     # The full end-to-end suite drives a real mitmweb and reaches httpbingo.org.
+    # mitmproxy is installed into its own venv rather than alongside this package:
+    # it pulls in 60+ dependencies and we only need its binary, so isolating it
+    # keeps a resolver conflict in that tree from failing the whole job.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e . mitmproxy
-      - run: python tests/test_e2e.py
+
+      - name: Install the package
+        run: pip install -e .
+
+      - name: Install mitmproxy in an isolated venv
+        run: |
+          python -m venv /tmp/mitmproxy-venv
+          /tmp/mitmproxy-venv/bin/pip install --upgrade pip
+          /tmp/mitmproxy-venv/bin/pip install mitmproxy
+          /tmp/mitmproxy-venv/bin/mitmweb --version
+          echo "TEST_MITMWEB=/tmp/mitmproxy-venv/bin/mitmweb" >> "$GITHUB_ENV"
+
+      - name: Run end-to-end tests
+        run: python tests/test_e2e.py
