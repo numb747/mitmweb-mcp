@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mitmweb-mcp"
+dynamic = ["version"]
+description = "An MCP server that reads the mitmweb session you are already watching — one UI, shared by you and your AI."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "mitmweb-mcp contributors" }]
+keywords = [
+    "mcp", "model-context-protocol", "mitmproxy", "mitmweb",
+    "http", "proxy", "scraping", "web-scraping", "reverse-engineering",
+    "security", "traffic-analysis", "claude",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: Proxy Servers",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Security",
+    "Topic :: Software Development :: Debuggers",
+]
+dependencies = [
+    "mcp>=1.2,<2",
+    "httpx>=0.27",
+    "curl_cffi>=0.7",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp"
+Repository = "https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp"
+Issues = "https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp/issues"
+
+[project.scripts]
+mitmweb-mcp = "mitmweb_mcp.server:main"
+
+[tool.hatch.version]
+path = "src/mitmweb_mcp/server.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mitmweb_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",    # long lines are handled by the formatter, not worth failing CI over
+    "SIM105",  # contextlib.suppress is not clearer than try/except here
+]

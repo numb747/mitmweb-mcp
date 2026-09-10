@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+
+  import-check:
+    # Verifies the package installs cleanly and every tool registers, on all
+    # supported Python versions. Cheap and needs no network beyond PyPI.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e .
+      - name: All tools register
+        run: |
+          python - <<'PY'
+          import asyncio
+          from mitmweb_mcp.server import mcp
+          tools = asyncio.run(mcp.list_tools())
+          names = sorted(t.name for t in tools)
+          print(names)
+          assert len(names) == 10, f"expected 10 tools, got {len(names)}"
+          assert "clear_flows" not in names, "destructive tool must not exist"
+          for t in tools:
+              assert t.description, f"{t.name} has no description"
+          PY
+
+  e2e:
+    # The full end-to-end suite drives a real mitmweb and reaches httpbingo.org.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e . mitmproxy
+      - run: python tests/test_e2e.py
