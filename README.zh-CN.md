@@ -58,7 +58,7 @@ pip install mitmweb-mcp
 或从源码安装:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp
+git clone https://github.com/numb747/mitmweb-mcp
 cd mitmweb-mcp
 pip install -e .
 ```
@@ -248,7 +248,7 @@ if __name__ == "__main__":
 ## 开发
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp
+git clone https://github.com/numb747/mitmweb-mcp
 cd mitmweb-mcp
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"

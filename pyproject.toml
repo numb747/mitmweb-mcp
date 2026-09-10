@@ -39,9 +39,9 @@ dependencies = [
 dev = ["ruff>=0.6"]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp"
-Repository = "https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp"
-Issues = "https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp/issues"
+Homepage = "https://github.com/numb747/mitmweb-mcp"
+Repository = "https://github.com/numb747/mitmweb-mcp"
+Issues = "https://github.com/numb747/mitmweb-mcp/issues"
 
 [project.scripts]
 mitmweb-mcp = "mitmweb_mcp.server:main"

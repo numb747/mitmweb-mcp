@@ -66,7 +66,7 @@ pip install mitmweb-mcp
 Or from source:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp
+git clone https://github.com/numb747/mitmweb-mcp
 cd mitmweb-mcp
 pip install -e .
 ```
@@ -266,7 +266,7 @@ job from the one this tool does.
 ## Development
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/mitmweb-mcp
+git clone https://github.com/numb747/mitmweb-mcp
 cd mitmweb-mcp
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
