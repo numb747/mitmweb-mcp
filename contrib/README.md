@@ -87,6 +87,13 @@ browser's own requests, not the target site's — leaving `OptimizationHints` on
 alone adds a dozen `optimizationguide-pa.googleapis.com` flows per startup.
 Pass `--set chrome_quiet=false` for a completely stock Chrome.
 
+**Loopback is left alone by default.** Chrome bypasses the proxy for
+`127.0.0.1`, and that default is worth keeping: browse the mitmweb UI in the
+captured browser and every click fetches a flow body over that same port, which
+the proxy records as a new flow — observing the capture grows the capture. Pass
+`--set chrome_capture_localhost=true` if you are reverse-engineering a local
+service; the UI port stays excluded even then.
+
 **A dedicated profile is not just tidiness.** If Chrome is already running,
 `--proxy-server` on a new invocation is *silently ignored* — the flag goes to a
 process that already exists, so the browser opens, pages load, and nothing

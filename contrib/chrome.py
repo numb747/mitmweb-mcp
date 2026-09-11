@@ -17,6 +17,10 @@ Differences from mitmproxy's built-in ``browser.start``:
   3. Chrome's own background services (sync, component updates, background
      networking, ML model downloads) are switched off. These only affect the
      browser's own requests — nothing the target site issues is touched.
+  4. Loopback keeps Chrome's default bypass, so browsing the mitmweb UI in this
+     same browser does not feed the capture back into itself. Set
+     ``--set chrome_capture_localhost=true`` to capture local services; the UI
+     port stays excluded even then.
 
 Prerequisite: mitmproxy's CA must be trusted by Chrome. On Linux, Chrome does
 not use the mitm.it flow — it reads the shared NSS database, so use certutil:
@@ -106,6 +110,12 @@ class ChromeLauncher:
             "account sync. Affects only the browser's own services; no traffic "
             "is filtered and the target site is unaffected.",
         )
+        loader.add_option(
+            "chrome_capture_localhost", bool, False,
+            "Also capture traffic to 127.0.0.1 (Chrome bypasses the proxy for "
+            "loopback by default). mitmweb's own UI port stays excluded either "
+            "way — capturing it would mean every click in the UI appends a flow.",
+        )
 
     def running(self) -> None:
         if not ctx.options.chrome or self.proc is not None:
@@ -137,14 +147,22 @@ class ChromeLauncher:
             binary,
             f"--user-data-dir={profile}",
             f"--proxy-server=http://{host}:{port}",
-            # Chrome bypasses the proxy for localhost by default; without this,
-            # traffic to a local service silently never reaches the capture.
-            "--proxy-bypass-list=<-loopback>",
             "--no-first-run",
             "--no-default-browser-check",
             *(QUIET_FLAGS if ctx.options.chrome_quiet else ()),
-            ctx.options.chrome_url,
         ]
+
+        if ctx.options.chrome_capture_localhost:
+            # "<-loopback>" removes Chrome's implicit loopback bypass. The web UI
+            # port is then added back explicitly: if the UI is browsed in this
+            # same Chrome, every click fetches a flow body over that port, which
+            # the proxy would capture as a new flow — observing the capture would
+            # keep growing it.
+            web_port = ctx.options.web_port or 8081
+            web_host = ctx.options.web_host or "127.0.0.1"
+            cmd.append(f"--proxy-bypass-list=<-loopback>;{web_host}:{web_port}")
+
+        cmd.append(ctx.options.chrome_url)
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
