@@ -26,7 +26,19 @@ CONFIG="${MITMWEB_MCP_CONFIG:-$HOME/.config/mitmweb-mcp/env}"
 # shellcheck disable=SC1090
 [ -f "$CONFIG" ] && . "$CONFIG"
 
-ADDON="${MITMWEB_CHROME_ADDON:-$(cd "$(dirname "$0")" && pwd)/chrome.py}"
+# Resolve through symlinks: this script is commonly linked into ~/.local/bin,
+# and $0 would then point there rather than at the directory holding chrome.py.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  link=$(readlink "$SELF")
+  case "$link" in
+    /*) SELF="$link" ;;
+    *)  SELF="$(dirname "$SELF")/$link" ;;
+  esac
+done
+HERE=$(cd "$(dirname "$SELF")" && pwd)
+
+ADDON="${MITMWEB_CHROME_ADDON:-$HERE/chrome.py}"
 PROXY_PORT="${MITMPROXY_PORT:-8080}"
 WEB_PORT="${MITMWEB_PORT:-8081}"
 TOKEN="${MITMWEB_TOKEN:-}"
@@ -68,7 +80,8 @@ EOF
 fi
 
 if [ ! -f "$ADDON" ]; then
-  echo "Error: addon not found at $ADDON (set MITMWEB_CHROME_ADDON)" >&2
+  echo "Error: addon not found at $ADDON" >&2
+  echo "Expected it next to this script; set MITMWEB_CHROME_ADDON to override." >&2
   exit 1
 fi
 
