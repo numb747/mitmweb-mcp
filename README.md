@@ -85,11 +85,22 @@ mitmweb --listen-port 8080 --set web_password=YOUR_SECRET_TOKEN
 - `8080` is the **proxy** port — point your browser here (replays go through it too)
 - `8081` is the **UI + API** — you watch this, and so does the MCP server
 
-Trust mitmproxy's CA once so HTTPS works: browse to <http://mitm.it> through the proxy,
-or import `~/.mitmproxy/mitmproxy-ca-cert.pem`.
+Trust mitmproxy's CA once so HTTPS works. **Firefox** accepts the <http://mitm.it>
+flow or an import of `~/.mitmproxy/mitmproxy-ca-cert.pem`. **Chrome on Linux does
+not** — it reads the shared NSS database, so use `certutil` instead:
+
+```bash
+certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n mitmproxy \
+         -i ~/.mitmproxy/mitmproxy-ca-cert.pem
+```
 
 Optionally start with a cleaner view:
-`--set view_filter='!~a & !~d googleapis.com'`
+`--set view_filter='!~a & !~d googleapis.com'`. Note that `view_filter` applies to
+`/flows.json` as well, so it narrows what this server sees, not just the UI.
+
+[`contrib/`](contrib/) has a mitmweb addon that launches a dedicated Chrome
+pointed at the proxy, plus `mitm-start` / `mitm-stop` scripts — optional, but it
+turns the whole thing into one command.
 
 ### 2. Register the MCP server
 

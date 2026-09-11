@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Stop a background mitmweb and clean up the Chrome it launched.
+#
+#   mitm-stop           stop mitmweb and Chrome
+#   mitm-stop -s        show status only, change nothing
+#   mitm-stop -b        stop Chrome only, leave mitmweb running
+#
+# Processes are located deliberately without `pkill -f mitmweb`: that pattern
+# also matches the shell running it (its own command line contains "mitmweb"),
+# which kills the script itself — exit 144 with no output whatsoever.
+# Two exact sources are used instead:
+#   - mitmweb: the PID listening on the UI port (ss -lptn)
+#   - Chrome:  the SingletonLock symlink in the profile ("hostname-PID"),
+#              Chrome's own bookkeeping. More reliable than a cmdline match,
+#              and it finds orphans the addon missed.
+
+set -uo pipefail
+
+CONFIG="${MITMWEB_MCP_CONFIG:-$HOME/.config/mitmweb-mcp/env}"
+# shellcheck disable=SC1090
+[ -f "$CONFIG" ] && . "$CONFIG"
+
+WEB_PORT="${MITMWEB_PORT:-8081}"
+PROXY_PORT="${MITMPROXY_PORT:-8080}"
+PROFILE="${CHROME_MITM_PROFILE:-$HOME/.cache/chrome-mitm}"
+
+only_status=0
+only_browser=0
+case "${1:-}" in
+  -s|--status)  only_status=1 ;;
+  -b|--browser) only_browser=1 ;;
+  -h|--help)    sed -n '2,17p' "$0" | sed 's/^# \?//'; exit 0 ;;
+esac
+
+port_pid() {
+  ss -lptnH "sport = :$1" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u | head -1
+}
+
+# Chrome's main PID, read from the profile lock ("hostname-PID").
+chrome_pid() {
+  local target
+  target=$(readlink "$PROFILE/SingletonLock" 2>/dev/null) || return 1
+  local pid="${target##*-}"
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+# TERM first so the process can shut down cleanly; KILL only if it will not.
+stop_pid() {
+  local pid="$1" name="$2" waited=0
+  kill -TERM "$pid" 2>/dev/null || return 0
+  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+    sleep 0.5; waited=$((waited + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "  $name (pid $pid) ignored TERM, sending KILL"
+    kill -KILL "$pid" 2>/dev/null
+    sleep 0.5
+  else
+    echo "  $name (pid $pid) stopped"
+  fi
+}
+
+MITM=$(port_pid "$WEB_PORT")
+CHROME=$(chrome_pid || true)
+
+if [ "$only_status" = 1 ]; then
+  echo "mitmweb : ${MITM:-not running} (UI :$WEB_PORT / proxy :$PROXY_PORT)"
+  echo "Chrome  : ${CHROME:-not running} (profile $PROFILE)"
+  [ -n "${MITM:-}" ] && \
+    echo "traffic : $(ss -tnH "dport = :$PROXY_PORT" 2>/dev/null | wc -l) active connections"
+  exit 0
+fi
+
+if [ "$only_browser" = 0 ]; then
+  if [ -n "${MITM:-}" ]; then
+    echo "Stopping mitmweb..."
+    # TERM lets mitmproxy shut down normally, giving the addon's done() hook a
+    # chance to clean up Chrome first.
+    stop_pid "$MITM" mitmweb
+  else
+    echo "mitmweb is not running on :$WEB_PORT"
+  fi
+fi
+
+# The addon's done() misses the real browser when Chrome handed its window to an
+# existing instance, so check the lock file as a backstop.
+sleep 1
+CHROME=$(chrome_pid || true)
+if [ -n "${CHROME:-}" ]; then
+  echo "Cleaning up Chrome..."
+  stop_pid "$CHROME" Chrome
+else
+  echo "Chrome is not running"
+fi
+
+# A hard exit leaves the lock behind, and Chrome then complains on next startup.
+rm -f "$PROFILE"/Singleton{Lock,Cookie,Socket} 2>/dev/null
+echo "Done."

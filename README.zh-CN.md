@@ -76,10 +76,20 @@ mitmweb --listen-port 8080 --set web_password=YOUR_SECRET_TOKEN
 - `8080` 是**代理**端口 —— 浏览器指向这里(重放也穿这里)
 - `8081` 是 **UI + API** —— 你看这个,MCP 也读这个
 
-HTTPS 需要先信任 mitmproxy 的 CA 证书(只做一次):走代理访问 <http://mitm.it> 按指引安装,
-或导入 `~/.mitmproxy/mitmproxy-ca-cert.pem`。
+HTTPS 需要先信任 mitmproxy 的 CA 证书(只做一次)。**Firefox** 走 <http://mitm.it>
+或导入 `~/.mitmproxy/mitmproxy-ca-cert.pem` 都行,**但 Chrome 在 Linux 上不吃这套** ——
+它读的是共享 NSS 库,必须用 `certutil`:
 
-想让界面一开始就清爽:`--set view_filter='!~a & !~d googleapis.com'`
+```bash
+certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n mitmproxy \
+         -i ~/.mitmproxy/mitmproxy-ca-cert.pem
+```
+
+想让界面一开始就清爽:`--set view_filter='!~a & !~d googleapis.com'`。注意
+`view_filter` 同样作用于 `/flows.json`,所以它收窄的不只是 UI,本服务器看到的也一样。
+
+[`contrib/`](contrib/) 里有个 mitmweb addon,能一并拉起指向该代理的专用 Chrome,
+外加 `mitm-start` / `mitm-stop` 脚本 —— 可选,但能把整套流程变成一条命令。
 
 ### 2. 注册 MCP 服务器
 

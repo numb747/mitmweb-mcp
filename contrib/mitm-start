@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Start mitmweb in the background with the Chrome addon, logging to a file.
+#
+#   mitm-start              start in the background
+#   mitm-start -f           run in the foreground (Ctrl-C to stop)
+#   mitm-start -l           follow the log
+#   mitm-start <url>        start and open <url> in Chrome
+#
+# Compared with `setsid mitmweb ... >/dev/null 2>&1 &`:
+#   - The log goes to a file instead of being discarded, so a busy port or a bad
+#     flag is diagnosable rather than just "it didn't come up".
+#   - Startup is confirmed before returning; on failure the log tail is printed.
+#   - Starting twice is refused. A second launch makes Chrome hand its window to
+#     the existing instance and exit, leaving an orphaned browser still pointed
+#     at the previous proxy port — an annoying thing to debug.
+#
+# Optional configuration in ~/.config/mitmweb-mcp/env:
+#   MITMWEB_TOKEN=...        required; must match the MCP server's token
+#   MITMPROXY_PORT=8080      proxy port; point your browser here
+#   MITMWEB_PORT=8081        UI + API port; you and the MCP server both read it
+#   CHROME_MITM_PROFILE=...  dedicated Chrome profile directory
+
+set -uo pipefail
+
+CONFIG="${MITMWEB_MCP_CONFIG:-$HOME/.config/mitmweb-mcp/env}"
+# shellcheck disable=SC1090
+[ -f "$CONFIG" ] && . "$CONFIG"
+
+ADDON="${MITMWEB_CHROME_ADDON:-$(cd "$(dirname "$0")" && pwd)/chrome.py}"
+PROXY_PORT="${MITMPROXY_PORT:-8080}"
+WEB_PORT="${MITMWEB_PORT:-8081}"
+TOKEN="${MITMWEB_TOKEN:-}"
+PROFILE="${CHROME_MITM_PROFILE:-$HOME/.cache/chrome-mitm}"
+LOG="${MITMWEB_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/mitmweb-mcp/mitmweb.log}"
+
+foreground=0
+follow=0
+url=""
+case "${1:-}" in
+  -f|--foreground) foreground=1 ;;
+  -l|--logs)       follow=1 ;;
+  -h|--help)       sed -n '2,24p' "$0" | sed 's/^# \?//'; exit 0 ;;
+  "")              ;;
+  *)               url="$1" ;;
+esac
+
+port_pid() {
+  ss -lptnH "sport = :$1" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u | head -1
+}
+
+if [ "$follow" = 1 ]; then
+  exec tail -f "$LOG"
+fi
+
+if [ -z "$TOKEN" ]; then
+  cat >&2 <<EOF
+Error: MITMWEB_TOKEN is not set.
+
+mitmweb generates a random web password on every launch, which the MCP server
+has no way to discover, so it must be pinned:
+
+  mkdir -p $(dirname "$CONFIG")
+  echo "MITMWEB_TOKEN=\$(openssl rand -hex 8)" > $CONFIG
+
+Then put the same value in the MCP server's MITMWEB_TOKEN.
+EOF
+  exit 1
+fi
+
+if [ ! -f "$ADDON" ]; then
+  echo "Error: addon not found at $ADDON (set MITMWEB_CHROME_ADDON)" >&2
+  exit 1
+fi
+
+if existing=$(port_pid "$WEB_PORT") && [ -n "$existing" ]; then
+  echo "mitmweb is already running (pid $existing, UI :$WEB_PORT)."
+  echo "Starting again would orphan a Chrome pointed at the old port."
+  echo "Run mitm-stop first."
+  exit 1
+fi
+
+ARGS=(
+  -s "$ADDON"
+  --listen-port "$PROXY_PORT"
+  --set "web_port=$WEB_PORT"
+  --set "web_password=$TOKEN"
+  --set "web_open_browser=false"
+  --set "chrome_profile=$PROFILE"
+)
+[ -n "$url" ] && ARGS+=(--set "chrome_url=$url")
+
+if [ "$foreground" = 1 ]; then
+  exec mitmweb "${ARGS[@]}"
+fi
+
+mkdir -p "$(dirname "$LOG")"
+setsid mitmweb "${ARGS[@]}" >"$LOG" 2>&1 </dev/null &
+
+# Confirm it actually came up rather than crashing on startup.
+for _ in $(seq 20); do
+  sleep 0.5
+  pid=$(port_pid "$WEB_PORT")
+  [ -n "$pid" ] && break
+done
+
+if [ -z "${pid:-}" ]; then
+  echo "Failed to start. Log tail ($LOG):" >&2
+  tail -n 15 "$LOG" >&2
+  exit 1
+fi
+
+echo "mitmweb started (pid $pid)"
+echo "  UI + API : http://127.0.0.1:$WEB_PORT"
+echo "  proxy    : http://127.0.0.1:$PROXY_PORT"
+echo "  profile  : $PROFILE"
+echo "  log      : $LOG"
+echo "  stop     : mitm-stop"
