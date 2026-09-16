@@ -44,21 +44,24 @@ jobs:
         with:
           python-version: "3.10"
       - run: pip install -e .
-      - name: Install the oldest mcp the package claims to support
-        # Read the bound out of the installed metadata instead of repeating the literal
-        # here: a hardcoded pin drifts silently the first time the floor is raised, and
-        # pip would not object — installing a version the package excludes only prints
-        # an error and still exits 0. `pip check` is what turns that into a failure.
+      - name: Install the oldest dependencies the package claims to support
+        # Read the bounds out of the installed metadata instead of repeating the
+        # literals here: a hardcoded pin drifts silently the first time a floor is
+        # raised, and pip would not object — installing a version the package excludes
+        # only prints an error and still exits 0. `pip check` turns that into a failure.
+        # pydantic is pinned too because the argument-model hardening in server.py
+        # depends on pydantic behaviour, and the newest release is not evidence about
+        # the oldest one this package claims to accept.
         run: |
-          floor=$(python - <<'PY'
+          python - <<'PY' > /tmp/floor-pins.txt
           import re
           from importlib.metadata import requires
-          req = next(r for r in requires("mitmweb-mcp") if re.match(r"mcp\b", r))
-          print(re.search(r">=\s*([\d.]+)", req).group(1))
+          for name in ("mcp", "pydantic"):
+              req = next(r for r in requires("mitmweb-mcp") if re.match(rf"{name}\b", r))
+              print(f"{name}=={re.search(r'>=\s*([\d.]+)', req).group(1)}")
           PY
-          )
-          echo "Declared floor: mcp==$floor"
-          pip install "mcp==$floor"
+          echo "Declared floors:"; cat /tmp/floor-pins.txt
+          pip install -r /tmp/floor-pins.txt
           pip check
       - run: python tests/check_tool_contract.py
 

@@ -1017,6 +1017,31 @@ async def replay_flow(
     )
 
 
+def _reject_unknown_arguments() -> None:
+    """Turn a misspelled argument into an error instead of a silent default.
+
+    FastMCP builds each tool's argument model with pydantic's default policy for
+    unrecognised keys, which is to ignore them. `get_content(max_byts=80)` therefore
+    validates cleanly and runs with body_max at 20000: the caller asked for a limit,
+    silently did not get one, and nothing anywhere says so. That is the worst failure
+    shape for an agent, which can recover from an error but not from a wrong answer it
+    has no reason to doubt.
+
+    func_metadata() exposes no switch for this, so set the policy on the models it
+    already built. Both the private attribute and the post-hoc rebuild are load-bearing
+    assumptions about someone else's library, which is why
+    tests/check_tool_contract.py asserts the behaviour end to end rather than trusting
+    that this ran.
+    """
+    for tool in mcp._tool_manager.list_tools():
+        model = tool.fn_metadata.arg_model
+        model.model_config["extra"] = "forbid"
+        model.model_rebuild(force=True)
+
+
+_reject_unknown_arguments()
+
+
 def main() -> None:
     """Console-script entry point."""
     mcp.run()

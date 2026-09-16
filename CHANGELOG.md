@@ -13,9 +13,16 @@
   If your MCP client is an AI agent, there is nothing to do: clients read
   `tools/list` when they connect, and upgrading this package restarts the
   server, so the new name is picked up automatically. Hand-written call sites
-  that pass `max_bytes=` do need editing — note that an unknown argument is
-  **silently dropped** rather than rejected, so such a call will quietly get the
-  20000-character default instead of the limit it asked for.
+  that pass `max_bytes=` do need editing — and as of this release such a call is
+  rejected by name rather than ignored, so it fails loudly instead of quietly
+  receiving the 20000-character default.
+
+- **An unrecognised argument is now an error on every tool.** FastMCP builds its
+  argument models with pydantic's default policy for unknown keys, which is to
+  ignore them, so `list_flows(limmit=5)` returned 30 rows and said nothing. An
+  agent can recover from an error; it cannot recover from a wrong answer it has
+  no reason to doubt. Misspellings that used to pass now raise and name the
+  offending argument.
 
 - **`get_content(which=...)`, `search_flows(scope=...)` and
   `generate_code(framework=...)` now reject invalid values before the call runs**

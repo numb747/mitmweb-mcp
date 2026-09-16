@@ -23,6 +23,39 @@ from mitmweb_mcp.server import mcp
 WRITER = "replay_flow"
 EXPECTED_TOOLS = 10
 
+# An argument name no tool will ever have. Passing it must be an error: pydantic ignores
+# unrecognised keys by default, which would let a misspelled limit fall back to its
+# default while the caller believes it was applied. server.py opts out of that, and this
+# asserts the result from the outside — the opt-out relies on a private FastMCP
+# attribute and on model_rebuild() honouring a config change, neither of which is
+# promised to keep working.
+SENTINEL_ARG = "definitely_not_a_real_argument"
+
+
+async def _check_rejects_unknown(name: str) -> str | None:
+    """Call one tool with a bogus argument and require it to be named in the error.
+
+    Only the bogus argument is passed, so the required ones are missing too and pydantic
+    reports both; all this needs is that the unknown one is among the complaints. A tool
+    whose arguments are all optional would otherwise run for real and fail on the absent
+    mitmweb, which is a different error and correctly counts as a failure here.
+    """
+    try:
+        await mcp.call_tool(name, {SENTINEL_ARG: 1})
+    except Exception as e:
+        message = str(e)
+        if SENTINEL_ARG in message and "extra_forbidden" in message:
+            return None
+        return f"{name}: unknown argument not rejected as such — {message.splitlines()[0]}"
+    return f"{name}: silently accepted an unknown argument"
+
+
+async def check_unknown_arguments(names: list[str]) -> list[str]:
+    results = [await _check_rejects_unknown(n) for n in names]
+    errors = [r for r in results if r]
+    print(f"unknown arguments rejected by {len(results) - len(errors)}/{len(results)} tools")
+    return errors
+
 
 def main() -> int:
     tools = asyncio.run(mcp.list_tools())
@@ -62,6 +95,8 @@ def main() -> int:
             errors.append(
                 f"{t.name} must declare readOnlyHint=True, got {a.readOnlyHint}"
             )
+
+    errors += asyncio.run(check_unknown_arguments(names))
 
     for e in errors:
         print(f"FAIL  {e}", file=sys.stderr)
