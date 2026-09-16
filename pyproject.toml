@@ -31,6 +31,9 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=1.2,<2",
+    # Imported directly for the Field(description=...) parameter annotations that make
+    # each argument self-describing in the tool schema. mcp depends on it too.
+    "pydantic>=2",
     "httpx>=0.27",
     "curl_cffi>=0.7",
 ]

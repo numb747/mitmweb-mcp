@@ -30,10 +30,12 @@ import os
 import re
 import shlex
 import time
+from typing import Annotated, Literal
 from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 __version__ = "0.1.0"
 
@@ -273,11 +275,21 @@ def _flat(d: dict, prefix: str = "") -> dict:
 
 # ----------------------------------------------------------------------------- tools
 
+# Every tool that takes a flow accepts the same thing, so the wording is shared rather
+# than retyped — an agent should learn the id-prefix rule once.
+FlowId = Annotated[str, Field(
+    description="Flow id — either the full id, or the 8-character prefix that "
+                "list_flows, search_flows and flow_stats hand back.",
+)]
+
+
 @mcp.tool()
 async def status() -> str:
     """Check connectivity to mitmweb and report how many flows are captured.
 
-    Start here when something is not working.
+    Start here when something is not working: on success it reports the UI address, the
+    proxy address replays will use, and the flow count; on failure it returns the error
+    plus the exact command to start mitmweb with a matching token.
     """
     try:
         flows = await mw.flows(fresh=True)
@@ -306,7 +318,12 @@ async def status() -> str:
 
 
 @mcp.tool()
-async def flow_stats(top_endpoints: int = 10) -> str:
+async def flow_stats(
+    top_endpoints: Annotated[int, Field(
+        description="How many of the busiest endpoints to list. The rest are still "
+                    "counted in the totals, just not enumerated.",
+    )] = 10,
+) -> str:
     """Overview of captured traffic: hosts, status codes, asset ratio, hottest endpoints.
 
     This is the first thing to run against an unfamiliar site: it tells you which host
@@ -351,29 +368,47 @@ async def flow_stats(top_endpoints: int = 10) -> str:
 
 @mcp.tool()
 async def list_flows(
-    limit: int = 30,
-    host: str | None = None,
-    method: str | None = None,
-    status_code: int | None = None,
-    url_contains: str | None = None,
-    content_type: str | None = None,
-    since_seconds: float | None = None,
-    marked_only: bool = False,
-    include_assets: bool = False,
+    limit: Annotated[int, Field(
+        description="Stop after this many matching flows.",
+    )] = 30,
+    host: Annotated[str | None, Field(
+        description="Keep only flows whose hostname contains this substring.",
+    )] = None,
+    method: Annotated[str | None, Field(
+        description="Keep only this HTTP method. Case-insensitive, e.g. \"POST\".",
+    )] = None,
+    status_code: Annotated[int | None, Field(
+        description="Keep only flows that returned exactly this status code, e.g. 403.",
+    )] = None,
+    url_contains: Annotated[str | None, Field(
+        description="Keep only flows whose full URL — scheme, host, path and query "
+                    "string — contains this substring. Case-insensitive.",
+    )] = None,
+    content_type: Annotated[str | None, Field(
+        description="Keep only flows whose response content-type contains this "
+                    "substring, e.g. \"json\".",
+    )] = None,
+    since_seconds: Annotated[float | None, Field(
+        description="Keep only flows captured in the last N seconds. If the user just "
+                    "clicked something, 15 isolates exactly what that click triggered.",
+    )] = None,
+    marked_only: Annotated[bool, Field(
+        description="Keep only flows the user has marked in the mitmweb UI — how the "
+                    "human points at the flows they care about.",
+    )] = False,
+    include_assets: Annotated[bool, Field(
+        description="Also return static assets (js/css/images/fonts), which are "
+                    "filtered out by default.",
+    )] = False,
 ) -> str:
-    """List recent flows, newest first.
+    """List recent flows, newest first — the main way to see what the browser just did.
 
-    Static assets (js/css/images/fonts) are excluded by default — the equivalent of
-    mitmproxy's `!~a` filter, and the single biggest signal-to-noise win. Pass
-    include_assets=True when you actually want them.
+    Static assets (js/css/images/fonts) are excluded by default: the equivalent of
+    mitmproxy's `!~a` filter, and the single biggest signal-to-noise win.
 
-    Two parameters make the human's UI actions usable as input:
-    - since_seconds: only flows from the last N seconds. If the user just clicked a
-      button, since_seconds=15 isolates exactly what that click triggered.
-    - marked_only: only flows the user has marked in the mitmweb UI.
-
-    url_contains matches the full URL including host and query string;
-    content_type is a substring match against the response type, e.g. "json".
+    Filters combine with AND. Each row is a compact summary — id, method, host, path,
+    status, content type, size and latency — so follow up with inspect_flow once a row
+    looks interesting.
     """
     flows = await mw.flows(fresh=True)
     cutoff = (time.time() - since_seconds) if since_seconds else None
@@ -403,9 +438,21 @@ async def list_flows(
 
 
 @mcp.tool()
-async def inspect_flow(flow_id: str, body_max: int = 4000) -> str:
-    """Full detail for one flow: URL, query params, both header sets, both bodies,
-    latency, and a ready-to-run equivalent curl command.
+async def inspect_flow(
+    flow_id: FlowId,
+    body_max: Annotated[int, Field(
+        description="Truncate each body to this many characters. Raise it for a longer "
+                    "preview, or use get_content to read one body in full.",
+    )] = 4000,
+) -> str:
+    """Everything about one flow: URL, parsed query parameters, both header sets, both
+    bodies, latency, and a ready-to-run curl command that reproduces the request.
+
+    This is the natural second step after list_flows or search_flows has pointed at a
+    flow. Reach for get_content instead when one body is long enough to need reading in
+    full, and for diff_flows when the question is how two requests differ rather than
+    what a single one contains. Binary bodies are reported as a placeholder, and the
+    curl command is direct — it does not go back through the proxy.
     """
     f = await _find(flow_id)
     req, resp = f.get("request") or {}, f.get("response") or {}
@@ -442,14 +489,22 @@ async def inspect_flow(flow_id: str, body_max: int = 4000) -> str:
 
 
 @mcp.tool()
-async def get_content(flow_id: str, which: str = "response", max_bytes: int = 20000) -> str:
-    """Fetch one full body (gzip/brotli already decoded). which = request | response.
+async def get_content(
+    flow_id: FlowId,
+    which: Annotated[Literal["request", "response"], Field(
+        description="Which side of the exchange to read: the body the client sent, or "
+                    "the one the server returned.",
+    )] = "response",
+    max_bytes: Annotated[int, Field(
+        description="Maximum amount of decoded text to return, counted in characters.",
+    )] = 20000,
+) -> str:
+    """Fetch one body in full, with gzip/brotli already decoded by mitmproxy.
 
-    Use this instead of inspect_flow when the body is large and you need more than
-    inspect_flow's 4000-character preview.
+    Use this instead of inspect_flow when a body is large and you need more than
+    inspect_flow's 4000-character preview. Binary payloads come back as a short
+    placeholder rather than pages of mojibake.
     """
-    if which not in ("request", "response"):
-        raise ValueError("which must be 'request' or 'response'")
     f = await _find(flow_id)
     text = _decode(await mw.raw(f["id"], which), _ctype(f.get(which) or {}))
     return _clip(text, max_bytes) if text else "<no body in that direction>"
@@ -457,25 +512,38 @@ async def get_content(flow_id: str, which: str = "response", max_bytes: int = 20
 
 @mcp.tool()
 async def search_flows(
-    keyword: str,
-    scope: str = "all",
-    regex: bool = False,
-    limit: int = 20,
-    max_scan: int = 200,
-    include_assets: bool = False,
+    keyword: Annotated[str, Field(
+        description="The text to look for. Matching is case-insensitive.",
+    )],
+    scope: Annotated[Literal["all", "url", "headers", "body"], Field(
+        description="Where to look. \"body\" is the slow one because bodies must be "
+                    "downloaded; \"url\" and \"headers\" read data already in memory.",
+    )] = "all",
+    regex: Annotated[bool, Field(
+        description="Treat keyword as a Python regular expression, e.g. "
+                    "\"sign=[a-f0-9]{32}\", instead of a literal string.",
+    )] = False,
+    limit: Annotated[int, Field(
+        description="Stop after this many matching flows.",
+    )] = 20,
+    max_scan: Annotated[int, Field(
+        description="How many of the newest flows to examine. Raise it to reach further "
+                    "back in the session; the result sets truncated=True when this cap "
+                    "was the reason the scan stopped.",
+    )] = 200,
+    include_assets: Annotated[bool, Field(
+        description="Also search static assets, which are skipped by default. Worth "
+                    "turning on when hunting for a key hard-coded in a JS bundle.",
+    )] = False,
 ) -> str:
     """Full-text search across flows: "which request carried or returned this value?"
 
     This is the usual entry point for reverse-engineering an API. Take a distinctive
     value visible in the page (an order number, a username, a token) and search for it
-    to find the endpoint that produced it.
-
-    scope = all | url | headers | body. With regex=True the keyword is a regular
-    expression, e.g. "sign=[a-f0-9]{32}". Scans backwards from the newest flow,
-    at most max_scan flows.
+    to find the endpoint that produced it. Scanning runs backwards from the newest flow;
+    each hit is a flow summary plus a short snippet around every match, so a URL match
+    is distinguishable from a body match at a glance.
     """
-    if scope not in ("all", "url", "headers", "body"):
-        raise ValueError("scope must be one of: all, url, headers, body")
     try:
         pat = re.compile(keyword if regex else re.escape(keyword), re.IGNORECASE)
     except re.error as e:
@@ -540,7 +608,17 @@ async def search_flows(
 
 
 @mcp.tool()
-async def diff_flows(flow_id_a: str, flow_id_b: str, body_max: int = 1500) -> str:
+async def diff_flows(
+    flow_id_a: FlowId,
+    flow_id_b: Annotated[str, Field(
+        description="The flow to compare against flow_id_a — usually the same endpoint "
+                    "called a second time. Full id or 8-character prefix.",
+    )],
+    body_max: Annotated[int, Field(
+        description="When the bodies cannot be compared field by field (non-JSON), both "
+                    "are returned verbatim, truncated to this many characters.",
+    )] = 1500,
+) -> str:
     """Compare two requests field by field — the tool for reverse-engineering signatures.
 
     Typical use: call the same endpoint twice (or capture it before and after paging),
@@ -594,6 +672,12 @@ async def detect_auth() -> str:
     to forge in order to call this API without a browser?" — a bearer token, a session
     cookie, a custom API-key header, or a signed request. Each finding includes sample
     flow ids you can pass straight to inspect_flow.
+
+    Takes no arguments — it always scans everything currently captured and groups what
+    it finds by scheme: bearer/JWT, basic auth, session cookie, API-key header, CSRF
+    token, signature header, and auth-looking endpoints. Detection is heuristic, based
+    on header and path names, so treat an empty result as "nothing obvious" rather than
+    as proof the API is open.
     """
     flows = await mw.flows(fresh=True)
     found: dict[str, dict] = {}
@@ -694,25 +778,33 @@ _CODE_PREAMBLE = {
 
 @mcp.tool()
 async def generate_code(
-    flow_ids: list | str,
-    framework: str = "curl_cffi",
-    impersonate: str = "chrome",
-    body_max: int = 8000,
+    flow_ids: Annotated[list | str, Field(
+        description="The flows to turn into requests, in the order they should run. "
+                    "Accepts a list of ids or one comma-separated string; each id may "
+                    "be a full id or an 8-character prefix.",
+    )],
+    framework: Annotated[Literal["curl_cffi", "httpx", "requests", "curl"], Field(
+        description="What to emit. curl_cffi fakes a real browser's TLS fingerprint and "
+                    "is the best default for scraping; httpx and requests produce plain "
+                    "Python; curl produces a bash script instead.",
+    )] = "curl_cffi",
+    impersonate: Annotated[str, Field(
+        description="Browser fingerprint written into curl_cffi output, e.g. chrome, "
+                    "chrome131, chrome142, safari, firefox, edge. Ignored by the other "
+                    "frameworks.",
+    )] = "chrome",
+    body_max: Annotated[int, Field(
+        description="Truncate each embedded request body to this many characters.",
+    )] = 8000,
 ) -> str:
-    """Turn captured flows into a runnable scraper script — the final deliverable.
+    """Turn captured flows into a runnable scraper script — the usual final deliverable.
 
-    flow_ids may be a list or a comma-separated string. The order is preserved in the
-    generated script and all requests share one Session, so a "log in, then call the
-    API" sequence replays correctly with cookies carried across.
+    All requests share one Session and keep the order you pass them in, so a "log in,
+    then call the API" sequence replays correctly with cookies carried across. Original
+    request headers are kept, minus the ones the HTTP client manages itself.
 
-    framework = curl_cffi (default; TLS fingerprint impersonation, best for scraping)
-    | httpx | requests | curl (emits a shell script instead).
-
-    Original request headers are kept, minus the ones the client manages itself.
+    The script is returned as text: nothing is written to disk and nothing is executed.
     """
-    if framework not in ("curl_cffi", "httpx", "requests", "curl"):
-        raise ValueError("framework must be one of: curl_cffi, httpx, requests, curl")
-
     ids = flow_ids if isinstance(flow_ids, list) else flow_ids.split(",")
     ids = [str(x).strip() for x in ids if str(x).strip()]
     if not ids:
@@ -773,23 +865,40 @@ async def generate_code(
 
 @mcp.tool()
 async def replay_flow(
-    flow_id: str,
-    method: str | None = None,
-    headers: dict | str | None = None,
-    body: str | dict | list | None = None,
-    impersonate: str = "chrome",
-    timeout: float = 30.0,
-    body_max: int = 4000,
+    flow_id: FlowId,
+    method: Annotated[str | None, Field(
+        description="Override the HTTP method, e.g. send a captured GET as a POST. "
+                    "Omit to reuse the original method.",
+    )] = None,
+    headers: Annotated[dict | str | None, Field(
+        description="Headers to add or override, e.g. {\"Authorization\": \"Bearer NEW\"}. "
+                    "Merged on top of the original headers; omit to reuse them as-is.",
+    )] = None,
+    body: Annotated[str | dict | list | None, Field(
+        description="Replacement request body; dicts and lists are serialised to JSON. "
+                    "Omit to resend the original body.",
+    )] = None,
+    impersonate: Annotated[str, Field(
+        description="Browser TLS fingerprint to present: chrome, chrome131, chrome142, "
+                    "safari, firefox, edge and other curl_cffi targets. An unsupported "
+                    "value comes back as a structured error, not an exception.",
+    )] = "chrome",
+    timeout: Annotated[float, Field(
+        description="Seconds to wait for the response before giving up.",
+    )] = 30.0,
+    body_max: Annotated[int, Field(
+        description="Truncate the returned response body to this many characters.",
+    )] = 4000,
 ) -> str:
     """Replay a request, optionally rewriting method, headers or body (like Burp Repeater).
 
+    This is the one tool that sends live traffic to the target — use it to check whether
+    a token still works, or which parameters an endpoint actually requires.
+
     The request is sent with curl_cffi using browser TLS fingerprint impersonation, and
     it goes *through your own mitmproxy*, so the result appears as a new flow in your
-    mitmweb UI where you can see it. Existing flows are never modified.
-
-    headers overrides or adds headers, e.g. {"Authorization": "Bearer NEW"}; omit to
-    reuse the original. body replaces the request body (dicts/lists are serialised to
-    JSON). impersonate accepts chrome / chrome131 / chrome142 / safari / firefox / edge.
+    mitmweb UI where you can see it. Existing flows are never modified and nothing is
+    deleted; redirects are not followed, so every hop stays visible.
     """
     try:
         from curl_cffi.requests import AsyncSession
