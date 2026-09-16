@@ -43,7 +43,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 MITMWEB_URL = os.environ.get("MITMWEB_URL", "http://127.0.0.1:8081").rstrip("/")
 TOKEN = os.environ.get("MITMWEB_TOKEN", "")
