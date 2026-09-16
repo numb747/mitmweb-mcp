@@ -45,21 +45,13 @@ jobs:
           python-version: "3.10"
       - run: pip install -e .
       - name: Install the oldest dependencies the package claims to support
-        # Read the bounds out of the installed metadata instead of repeating the
-        # literals here: a hardcoded pin drifts silently the first time a floor is
-        # raised, and pip would not object — installing a version the package excludes
-        # only prints an error and still exits 0. `pip check` turns that into a failure.
-        # pydantic is pinned too because the argument-model hardening in server.py
-        # depends on pydantic behaviour, and the newest release is not evidence about
-        # the oldest one this package claims to accept.
+        # pydantic is pinned alongside mcp because the argument-model hardening in
+        # server.py rests on pydantic behaviour, and whatever pydantic is newest says
+        # nothing about the oldest this package claims to accept. `pip check` is what
+        # turns a pin that no longer matches the declared bound into a failure — pip
+        # itself only prints an error and exits 0.
         run: |
-          python - <<'PY' > /tmp/floor-pins.txt
-          import re
-          from importlib.metadata import requires
-          for name in ("mcp", "pydantic"):
-              req = next(r for r in requires("mitmweb-mcp") if re.match(rf"{name}\b", r))
-              print(f"{name}=={re.search(r'>=\s*([\d.]+)', req).group(1)}")
-          PY
+          python tests/dependency_floors.py > /tmp/floor-pins.txt
           echo "Declared floors:"; cat /tmp/floor-pins.txt
           pip install -r /tmp/floor-pins.txt
           pip check
