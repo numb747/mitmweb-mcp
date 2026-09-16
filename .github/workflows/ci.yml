@@ -86,5 +86,10 @@ jobs:
           /tmp/mitmproxy-venv/bin/mitmweb --version
           echo "TEST_MITMWEB=/tmp/mitmproxy-venv/bin/mitmweb" >> "$GITHUB_ENV"
 
+      - name: Check the Chrome addon's bypass rules
+        # Runs in the mitmproxy venv: contrib/chrome.py needs mitmproxy and nothing
+        # else. Launches no browser. This is the only job with mitmproxy available.
+        run: /tmp/mitmproxy-venv/bin/python tests/check_chrome_bypass.py
+
       - name: Run end-to-end tests
         run: python tests/test_e2e.py

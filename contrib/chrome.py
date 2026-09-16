@@ -62,6 +62,41 @@ QUIET_FLAGS = (
 )
 
 
+def _bypass_list(web_host: str | None, web_port: int | None) -> str:
+    """Build --proxy-bypass-list for the capture-localhost case.
+
+    "<-loopback>" subtracts Chrome's *entire* implicit bypass set — localhost,
+    *.localhost, [::1], 127.0.0.1/8, 169.254/16, [FE80::]/10 — so the UI address
+    has to be added back afterwards. Order matters: rules are evaluated
+    left-to-right, so the re-added entries must follow the subtraction.
+
+    They have to be added back once per spelling. Chrome resolves the proxy
+    before it resolves the name, so a rule is matched against the host exactly as
+    it appears in the URL: a rule for 127.0.0.1:8081 does nothing when the UI is
+    opened as http://localhost:8081/, which is what browser autocomplete offers.
+    Miss that and the feedback loop this option exists to prevent comes back —
+    every click in the UI fetches a flow body through the proxy, appending a flow.
+
+    IPv6 literals must be bracketed to be valid rules, so an unbracketed
+    web_host=::1 cannot be relied on to match anything.
+    """
+    rules = ["<-loopback>"]
+    if web_port is None:
+        # Not mitmweb — mitmdump registers no web_port, and there is no UI to keep
+        # out of the capture. Subtract the implicit bypasses and nothing more;
+        # inventing 8081 here would exclude whatever else happens to hold it.
+        return rules[0]
+
+    hosts = ["localhost", "127.0.0.1", "[::1]"]
+    # A wildcard bind is not a name any URL can carry; the loopback spellings
+    # above are how the UI is actually reached in that case.
+    if web_host and web_host not in ("0.0.0.0", "::"):
+        hosts.append(f"[{web_host}]" if ":" in web_host else web_host)
+
+    rules += [f"{h}:{web_port}" for h in dict.fromkeys(hosts)]
+    return ";".join(rules)
+
+
 class ChromeLauncher:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
@@ -153,14 +188,15 @@ class ChromeLauncher:
         ]
 
         if ctx.options.chrome_capture_localhost:
-            # "<-loopback>" removes Chrome's implicit loopback bypass. The web UI
-            # port is then added back explicitly: if the UI is browsed in this
-            # same Chrome, every click fetches a flow body over that port, which
-            # the proxy would capture as a new flow — observing the capture would
-            # keep growing it.
-            web_port = ctx.options.web_port or 8081
-            web_host = ctx.options.web_host or "127.0.0.1"
-            cmd.append(f"--proxy-bypass-list=<-loopback>;{web_host}:{web_port}")
+            # web_port/web_host come from mitmweb's WebAddon, not from core options,
+            # so under mitmdump they do not exist at all and a plain attribute read
+            # raises inside this hook. getattr also makes the "is there a UI?" test
+            # explicit — `or 8081` could never have answered it, since the option
+            # carries a non-empty default whenever it is registered.
+            cmd.append("--proxy-bypass-list=" + _bypass_list(
+                getattr(ctx.options, "web_host", None),
+                getattr(ctx.options, "web_port", None),
+            ))
 
         cmd.append(ctx.options.chrome_url)
         self.proc = subprocess.Popen(
