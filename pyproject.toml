@@ -38,8 +38,10 @@ dependencies = [
     # find_context_parameter(). The floor-check CI job holds this honest.
     "mcp>=1.14,<2",
     # Imported directly for the Field(description=...) parameter annotations that make
-    # each argument self-describing in the tool schema. mcp depends on it too.
-    "pydantic>=2",
+    # each argument self-describing in the tool schema. The floor tracks what mcp 1.14
+    # itself requires (>=2.11, and >=2.12 on Python 3.14, via its own marker); claiming
+    # plain >=2 here would be unresolvable and therefore untestable.
+    "pydantic>=2.11",
     "httpx>=0.27",
     "curl_cffi>=0.7",
 ]

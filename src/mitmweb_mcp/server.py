@@ -10,6 +10,11 @@ Safety boundary: read-only and append-only. Every analysis tool is a plain GET.
 `replay_flow` never mutates an existing flow either — it re-sends the request through
 your proxy, so the result shows up as a *new* flow in your UI.
 
+That boundary is about *this* session, and it is published to clients as annotations:
+the nine analysis tools declare `readOnlyHint`. `replay_flow` declares
+`destructiveHint` instead, because the other end of the wire is not covered by any of
+the above — it replays whatever was captured, and a captured DELETE still deletes.
+
 Prerequisite — start mitmweb with a fixed token, otherwise it generates a random
 password on every launch and this server cannot authenticate:
 
@@ -381,7 +386,9 @@ async def flow_stats(
 
 @mcp.tool(annotations=_reads("List flows"))
 async def list_flows(
+    # ge=1 because the cap is checked after the append: limit=0 would return one row.
     limit: Annotated[int, Field(
+        ge=1,
         description="Stop after this many matching flows.",
     )] = 30,
     host: Annotated[str | None, Field(
@@ -508,8 +515,10 @@ async def get_content(
         description="Which side of the exchange to read: the body the client sent, or "
                     "the one the server returned.",
     )] = "response",
-    max_bytes: Annotated[int, Field(
-        description="Maximum amount of decoded text to return, counted in characters.",
+    body_max: Annotated[int, Field(
+        description="Truncate the body to this many characters — characters, not bytes, "
+                    "so a CJK or emoji-heavy body can be several times this many bytes. "
+                    "A truncation notice is appended, so the cap is soft by ~35 chars.",
     )] = 20000,
 ) -> str:
     """Fetch one body in full, with gzip/brotli already decoded by mitmproxy.
@@ -520,7 +529,7 @@ async def get_content(
     """
     f = await _find(flow_id)
     text = _decode(await mw.raw(f["id"], which), _ctype(f.get(which) or {}))
-    return _clip(text, max_bytes) if text else "<no body in that direction>"
+    return _clip(text, body_max) if text else "<no body in that direction>"
 
 
 @mcp.tool(annotations=_reads("Search flows"))
@@ -537,6 +546,7 @@ async def search_flows(
                     "\"sign=[a-f0-9]{32}\", instead of a literal string.",
     )] = False,
     limit: Annotated[int, Field(
+        ge=1,  # as in list_flows: the cap is checked after the append
         description="Stop after this many matching flows.",
     )] = 20,
     max_scan: Annotated[int, Field(
@@ -688,7 +698,9 @@ async def detect_auth() -> str:
 
     Takes no arguments — it always scans everything currently captured and groups what
     it finds by scheme: bearer/JWT, basic auth, session cookie, API-key header, CSRF
-    token, signature header, and auth-looking endpoints. Detection is heuristic, based
+    token, signature header, auth-looking endpoints, and authorization_other for any
+    other Authorization scheme — AWS SigV4, Digest and vendor schemes land there.
+    Detection is heuristic, based
     on header and path names, so treat an empty result as "nothing obvious" rather than
     as proof the API is open.
     """
@@ -815,9 +827,14 @@ async def generate_code(
 ) -> str:
     """Turn captured flows into a runnable scraper script — the usual final deliverable.
 
-    All requests share one Session and keep the order you pass them in, so a "log in,
-    then call the API" sequence replays correctly with cookies carried across. Original
-    request headers are kept, minus the ones the HTTP client manages itself.
+    Requests keep the order you pass them in, and original request headers are kept
+    minus the ones the HTTP client manages itself.
+
+    In the three Python outputs they also share one Session, so a "log in, then call the
+    API" sequence replays correctly with cookies carried across. framework="curl" cannot
+    do that: it emits independent commands with no cookie jar, so each one carries only
+    the Cookie header that happened to be captured. Prefer a Python framework whenever
+    the sequence depends on a login.
 
     The script is returned as text: nothing is written to disk and nothing is executed.
     """

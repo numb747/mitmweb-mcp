@@ -31,25 +31,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e .
-      - name: All tools register
-        run: |
-          python - <<'PY'
-          import asyncio
-          from mitmweb_mcp.server import mcp
-          tools = asyncio.run(mcp.list_tools())
-          names = sorted(t.name for t in tools)
-          print(names)
-          assert len(names) == 10, f"expected 10 tools, got {len(names)}"
-          assert "clear_flows" not in names, "destructive tool must not exist"
-          for t in tools:
-              assert t.description, f"{t.name} has no description"
-              assert t.annotations, f"{t.name} has no annotations"
-          PY
+      - run: python tests/check_tool_contract.py
 
   floor-check:
     # import-check always resolves the newest mcp, so it can never notice that the
     # declared lower bound is a fiction — which is exactly what >=1.2 turned out to be.
-    # Pin the floor exactly and make sure the server still comes up on it.
+    # Install the floor exactly and make sure the server still comes up on it.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,22 +44,23 @@ jobs:
         with:
           python-version: "3.10"
       - run: pip install -e .
-      - name: Install the oldest supported mcp
-        run: pip install "mcp==1.14.0"
-      - name: Server still registers every tool on the floor version
+      - name: Install the oldest mcp the package claims to support
+        # Read the bound out of the installed metadata instead of repeating the literal
+        # here: a hardcoded pin drifts silently the first time the floor is raised, and
+        # pip would not object — installing a version the package excludes only prints
+        # an error and still exits 0. `pip check` is what turns that into a failure.
         run: |
-          python - <<'PY'
-          import asyncio
-          from mitmweb_mcp.server import mcp
-          tools = asyncio.run(mcp.list_tools())
-          assert len(tools) == 10, f"expected 10 tools, got {len(tools)}"
-          for t in tools:
-              assert t.annotations, f"{t.name} lost its annotations"
-              params = (t.inputSchema or {}).get("properties", {})
-              undocumented = [k for k, v in params.items() if not v.get("description")]
-              assert not undocumented, f"{t.name}: undocumented {undocumented}"
-          print("floor OK")
+          floor=$(python - <<'PY'
+          import re
+          from importlib.metadata import requires
+          req = next(r for r in requires("mitmweb-mcp") if re.match(r"mcp\b", r))
+          print(re.search(r">=\s*([\d.]+)", req).group(1))
           PY
+          )
+          echo "Declared floor: mcp==$floor"
+          pip install "mcp==$floor"
+          pip check
+      - run: python tests/check_tool_contract.py
 
   e2e:
     # The full end-to-end suite drives a real mitmweb and reaches httpbingo.org.

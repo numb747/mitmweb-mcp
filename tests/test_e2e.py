@@ -135,7 +135,7 @@ async def main() -> None:
         check("PNG body reported as binary, not mojibake", pb.startswith("<binary"), pb[:60])
 
         print("\n[get_content]")
-        body = await call("get_content", flow_id=get_id[:8], which="response", max_bytes=80)
+        body = await call("get_content", flow_id=get_id[:8], which="response", body_max=80)
         check("short id prefix resolves", "Example Domain" in body, repr(body[:45]))
 
         print("\n[search_flows]")
