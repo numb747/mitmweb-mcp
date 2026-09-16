@@ -35,6 +35,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from pydantic import Field
 
 __version__ = "0.1.0"
@@ -283,7 +284,19 @@ FlowId = Annotated[str, Field(
 )]
 
 
-@mcp.tool()
+def _reads(title: str) -> ToolAnnotations:
+    """Annotations for the nine tools that only read.
+
+    Each is a plain GET against the mitmweb API: it cannot change the flow list and it
+    never reaches past the local proxy. Stating that in annotations is what lets a client
+    decide on its own to run these without asking, and to stop and ask about replay_flow.
+    destructiveHint and idempotentHint are deliberately absent — the spec defines them as
+    meaningful only when readOnlyHint is false.
+    """
+    return ToolAnnotations(title=title, readOnlyHint=True, openWorldHint=False)
+
+
+@mcp.tool(annotations=_reads("Check the mitmweb connection"))
 async def status() -> str:
     """Check connectivity to mitmweb and report how many flows are captured.
 
@@ -317,7 +330,7 @@ async def status() -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads("Traffic overview"))
 async def flow_stats(
     top_endpoints: Annotated[int, Field(
         description="How many of the busiest endpoints to list. The rest are still "
@@ -366,7 +379,7 @@ async def flow_stats(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads("List flows"))
 async def list_flows(
     limit: Annotated[int, Field(
         description="Stop after this many matching flows.",
@@ -437,7 +450,7 @@ async def list_flows(
     return json.dumps(out, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads("Inspect one flow"))
 async def inspect_flow(
     flow_id: FlowId,
     body_max: Annotated[int, Field(
@@ -488,7 +501,7 @@ async def inspect_flow(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads("Read one full body"))
 async def get_content(
     flow_id: FlowId,
     which: Annotated[Literal["request", "response"], Field(
@@ -510,7 +523,7 @@ async def get_content(
     return _clip(text, max_bytes) if text else "<no body in that direction>"
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads("Search flows"))
 async def search_flows(
     keyword: Annotated[str, Field(
         description="The text to look for. Matching is case-insensitive.",
@@ -607,7 +620,7 @@ async def search_flows(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads("Diff two requests"))
 async def diff_flows(
     flow_id_a: FlowId,
     flow_id_b: Annotated[str, Field(
@@ -664,7 +677,7 @@ async def diff_flows(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_reads("Detect authentication schemes"))
 async def detect_auth() -> str:
     """Scan all traffic and report which authentication schemes the site uses.
 
@@ -776,7 +789,10 @@ _CODE_PREAMBLE = {
 }
 
 
-@mcp.tool()
+# Read-only like the rest: it turns captured flows into source text and hands it back.
+# Nothing is written to disk and nothing is executed — running the script is the user's
+# separate, deliberate act.
+@mcp.tool(annotations=_reads("Generate scraper code"))
 async def generate_code(
     flow_ids: Annotated[list | str, Field(
         description="The flows to turn into requests, in the order they should run. "
@@ -863,7 +879,18 @@ async def generate_code(
     return "\n".join(out)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(
+    title="Replay a request",
+    # The only tool here that is not a read. It appends to this server's world — a new
+    # flow, never an edit to an existing one — but it also puts a real request on the
+    # wire, and what it replays is whatever was captured. Replay a DELETE and something
+    # gets deleted, so the honest hint is destructive; the append-only guarantee this
+    # project makes is about the flow list, not about the target.
+    readOnlyHint=False,
+    destructiveHint=True,
+    idempotentHint=False,
+    openWorldHint=True,
+))
 async def replay_flow(
     flow_id: FlowId,
     method: Annotated[str | None, Field(

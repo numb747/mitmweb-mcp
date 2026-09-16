@@ -30,7 +30,13 @@ classifiers = [
     "Topic :: Software Development :: Debuggers",
 ]
 dependencies = [
-    "mcp>=1.2,<2",
+    # 1.7 is the first release whose FastMCP accepts tool annotations, but 1.14 is the
+    # first that actually imports this module: until then Tool.from_function probed each
+    # parameter with a bare issubclass(), which raises on any annotation that is not a
+    # plain class — and `from __future__ import annotations` makes every one of ours a
+    # string. The old >=1.2 floor had never worked; 1.14 replaced the probe with
+    # find_context_parameter(). The floor-check CI job holds this honest.
+    "mcp>=1.14,<2",
     # Imported directly for the Field(description=...) parameter annotations that make
     # each argument self-describing in the tool schema. mcp depends on it too.
     "pydantic>=2",

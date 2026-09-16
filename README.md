@@ -49,6 +49,12 @@ Nine of the ten tools are plain `GET` requests and cannot alter your session.
 appends a new flow. The worst case is a few extra rows; nothing you are looking at
 can silently change or disappear.
 
+This boundary is published, not just documented: the nine readers carry
+`readOnlyHint: true`, so a client can decide on its own to run them without asking.
+`replay_flow` is marked `destructiveHint: true` — it appends to *your* session, but
+what it puts on the wire is whatever was captured, and replaying a `DELETE` deletes
+something. It should be the one tool that stops and asks.
+
 There is deliberately **no `clear_flows` tool**. Wiping the session is destructive and
 irreversible, it is one click in the UI, and there is no reason to hand an AI that
 button.
